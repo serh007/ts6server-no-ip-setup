@@ -19,8 +19,8 @@
 ## ⚡ Як користуватися: 2 простих варіанти
 0. Створюємо аккаунт Portwarp та створюємо Tunnel
 <img width="1421" height="751" alt="image" src="https://github.com/user-attachments/assets/d583b6bb-a9f3-4fbd-b0cf-1484477d6739" />
-<img width="1260" height="722" alt="image" src="https://github.com/user-attachments/assets/cd87166c-5598-4ed9-bed2-d14fe3361b88" />
 <img width="1301" height="668" alt="image" src="https://github.com/user-attachments/assets/333815d2-5cf1-4231-9488-875979b5f9ea" />
+<img width="1260" height="722" alt="image" src="https://github.com/user-attachments/assets/cd87166c-5598-4ed9-bed2-d14fe3361b88" />
 <img width="1285" height="777" alt="image" src="https://github.com/user-attachments/assets/8d70212d-792e-467e-b524-fc918b44f57c" />
 
    
