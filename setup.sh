@@ -203,6 +203,9 @@ CONNECT_OUT=$(docker compose exec -T pwrp pwrp connect "${TUNNEL_NAME}" --detach
               docker compose exec -T pwrp pwrp connect 1 --detach --save --local-host teamspeak 2>&1 || \
               docker compose exec -T pwrp pwrp connect --all --detach --save --local-host teamspeak 2>&1 || true)
 
+# Вмикаємо автоматичний запуск тунелю при старті контейнера (після ребуту системи)
+docker compose exec -T pwrp pwrp config set boot-all on >/dev/null 2>&1 || true
+
 AUTO_ADDR=$(echo "$CONNECT_OUT" | grep -E -o '[a-zA-Z0-9.-]+\.tryportwarp\.cc:[0-9]+' | head -n 1 || true)
 if [ -z "$AUTO_ADDR" ]; then
     AUTO_ADDR=$(docker compose exec -T pwrp pwrp tunnels 2>&1 | grep -E -o '[a-zA-Z0-9.-]+\.tryportwarp\.cc:[0-9]+' | head -n 1 || true)

@@ -242,6 +242,9 @@ try {
         $connectOut = docker compose exec -T pwrp pwrp connect --all --detach --save --local-host teamspeak 2>&1 | Out-String
     }
 
+    # Вмикаємо автоматичний запуск тунелю при старті контейнера (після ребуту системи)
+    docker compose exec -T pwrp pwrp config set boot-all on 2>&1 | Out-Null
+
     $autoAddr = ""
     if ($connectOut -match "([a-zA-Z0-9.-]+\.tryportwarp\.cc:\d+)") {
         $autoAddr = $Matches[1]
