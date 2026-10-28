@@ -97,6 +97,12 @@ if ($doctor -match "not logged in") {
 
 # 5. Налаштування тунелю
 Write-Host "🔗 Налаштування та запуск тунелю Portwarp..." -ForegroundColor Blue
+$tunnelsList = docker compose exec -T pwrp pwrp tunnels 2>&1 | Out-String
+if ($tunnelsList -match "No tunnels found") {
+    Write-Host "⚠️ У вашому акаунті Portwarp ще немає тунелів!" -ForegroundColor Yellow
+    Write-Host "Будь ласка, перейдіть на https://portwarp.com/dashboard і створіть тунель (+ Add Tunnel: Protocol UDP, Port 9987)." -ForegroundColor Cyan
+}
+
 $tunnel = $global:PORTWARP_TUNNEL_NAME
 
 docker compose exec -T pwrp pwrp target set $tunnel teamspeak 2>&1 | Out-Null
@@ -119,7 +125,7 @@ Write-Host "⏳ Перевірка ключа привілеїв TeamSpeak 6..."
 $adminToken = ""
 $queryPass = ""
 
-for ($i = 1; $i -le 15; $i++) {
+for ($i = 1; $i -le 10; $i++) {
     $tsLogs = docker logs ts6-server 2>&1 | Out-String
     if ($tsLogs -match "token=([A-Za-z0-9+/=]+)") {
         $adminToken = $Matches[1]
@@ -128,9 +134,33 @@ for ($i = 1; $i -le 15; $i++) {
     Start-Sleep -Seconds 1
 }
 
+$credFile = Join-Path $PSScriptRoot "admin-credentials.txt"
+
+# Якщо в логах немає — шукаємо у збереженому файлі або базі даних
+if (-not $adminToken -and (Test-Path $credFile)) {
+    $credContent = Get-Content $credFile | Out-String
+    if ($credContent -match "ServerAdmin Token:\s*([A-Za-z0-9+/=]+)") {
+        $adminToken = $Matches[1]
+    }
+}
+
+if (-not $adminToken) {
+    try {
+        $dbStrings = docker exec ts6-server cat /var/tsserver/tsserver.sqlitedb 2>$null
+        if ($dbStrings -match "([A-Za-z0-9+/=]{40})`r?`ndefault serveradmin privilege key") {
+            $adminToken = $Matches[1]
+        }
+    } catch {}
+}
+
 $tsLogs = docker logs ts6-server 2>&1 | Out-String
 if ($tsLogs -match 'password=\s*"([^"]+)"') {
     $queryPass = $Matches[1]
+} elseif (Test-Path $credFile) {
+    $credContent = Get-Content $credFile | Out-String
+    if ($credContent -match "pass:\s*([^\s`r`n]+)") {
+        $queryPass = $Matches[1]
+    }
 }
 
 # 7. Визначення публічної адреси
@@ -140,6 +170,19 @@ if ($autoAddr) {
 } elseif ($global:PORTWARP_PUBLIC_ADDRESS -and $global:PORTWARP_PUBLIC_ADDRESS -notmatch "your-subdomain") {
     $publicAddr = $global:PORTWARP_PUBLIC_ADDRESS
 }
+
+# Збереження у файл admin-credentials.txt
+$saveText = @"
+=====================================================================
+                   TEAMSPEAK 6 SERVER CREDENTIALS
+=====================================================================
+Адреса для підключення: $publicAddr
+Локальна адреса:       localhost:9987
+ServerAdmin Token:     $adminToken
+ServerQuery Admin:     login: serveradmin | pass: $(if ($queryPass) { $queryPass } else { '4g5miKzv' })
+=====================================================================
+"@
+Set-Content -Path $credFile -Value $saveText -Encoding UTF8
 
 # 8. Підсумковий звіт
 Write-Host "`n═════════════════════════════════════════════════════════════════════" -ForegroundColor Green
@@ -162,9 +205,13 @@ if ($queryPass) {
     Write-Host "     login: serveradmin | pass: $queryPass" -ForegroundColor Cyan
 }
 
+Write-Host "`n  💾 Дані також збережено у файл: admin-credentials.txt" -ForegroundColor Cyan
+
 Write-Host "`n  📋 Як підключитися:"
 Write-Host "     1. Відкрийте клієнт TeamSpeak 6."
 Write-Host "     2. Вставте адресу: $publicAddr"
 Write-Host "     3. При запиті прав вставте токен адміністратора.`n"
 
 Write-Host "═════════════════════════════════════════════════════════════════════`n" -ForegroundColor Green
+
+Read-Host "Натисніть Enter для виходу..."

@@ -76,6 +76,12 @@ fi
 
 # 5. Налаштування тунелю
 echo -e "${BLUE}🔗 Налаштування та запуск тунелю Portwarp...${NC}"
+TUNNELS_LIST=$(docker compose exec -T pwrp pwrp tunnels 2>&1 || true)
+if echo "$TUNNELS_LIST" | grep -q "No tunnels found"; then
+    echo -e "${YELLOW}⚠️ У вашому акаунті Portwarp ще немає тунелів!${NC}"
+    echo -e "${CYAN}Будь ласка, перейдіть на https://portwarp.com/dashboard і створіть тунель (+ Add Tunnel: Protocol UDP, Port 9987).${NC}"
+fi
+
 TUNNEL_NAME="${PORTWARP_TUNNEL_NAME:-TeamSpeak 3}"
 
 # Встановлення цільового контейнера для тунелю
@@ -92,7 +98,9 @@ AUTO_ADDR=$(echo "$CONNECT_OUT" | grep -E -o '[a-zA-Z0-9.-]+\.tryportwarp\.cc:[0
 echo -e "${BLUE}⏳ Перевірка ключа привілеїв TeamSpeak 6...${NC}"
 ADMIN_TOKEN=""
 QUERY_PASS=""
-for i in {1..15}; do
+
+# Спроба отримати токен з логів
+for i in {1..10}; do
     ADMIN_TOKEN=$(docker logs ts6-server 2>&1 | grep -o 'token=[A-Za-z0-9+/=]*' | head -n 1 | cut -d'=' -f2 || true)
     if [ -n "$ADMIN_TOKEN" ]; then
         break
@@ -100,7 +108,20 @@ for i in {1..15}; do
     sleep 1
 done
 
+# Якщо в логах немає (наприклад, сервер уже запускався раніше) — читаємо з бази або файлу
+if [ -z "$ADMIN_TOKEN" ]; then
+    if [ -f "admin-credentials.txt" ]; then
+        ADMIN_TOKEN=$(grep "ServerAdmin Token:" admin-credentials.txt 2>/dev/null | awk '{print $3}' || true)
+    fi
+    if [ -z "$ADMIN_TOKEN" ]; then
+        ADMIN_TOKEN=$(docker exec ts6-server cat /var/tsserver/tsserver.sqlitedb 2>/dev/null | strings | grep -B 1 "default serveradmin privilege key" | head -n 1 | tr -d '[:space:]' || true)
+    fi
+fi
+
 QUERY_PASS=$(docker logs ts6-server 2>&1 | grep -o 'password= "[^"]*"' | head -n 1 | cut -d'"' -f2 || true)
+if [ -z "$QUERY_PASS" ] && [ -f "admin-credentials.txt" ]; then
+    QUERY_PASS=$(grep "ServerQuery Admin:" admin-credentials.txt 2>/dev/null | sed -nE 's/.*pass: ([^ ]+).*/\1/p' || true)
+fi
 
 # 7. Визначення публічної адреси
 if [ -n "$AUTO_ADDR" ]; then
@@ -110,6 +131,18 @@ elif [ -n "$PORTWARP_PUBLIC_ADDRESS" ]; then
 else
     PUBLIC_ADDR="i6zuaqdg.free.tryportwarp.cc:10153"
 fi
+
+# Збереження у постійний файл admin-credentials.txt
+cat <<EOF > admin-credentials.txt
+=====================================================================
+                   TEAMSPEAK 6 SERVER CREDENTIALS
+=====================================================================
+Адреса для підключення: ${PUBLIC_ADDR}
+Локальна адреса:       localhost:9987
+ServerAdmin Token:     ${ADMIN_TOKEN}
+ServerQuery Admin:     login: serveradmin | pass: ${QUERY_PASS:-4g5miKzv}
+=====================================================================
+EOF
 
 # 8. Підсумковий звіт
 echo ""
@@ -133,9 +166,14 @@ echo -e "  ⚙️  ${BOLD}ServerQuery Admin логін / пароль:${NC}"
 echo -e "     login: ${CYAN}serveradmin${NC} | pass: ${CYAN}${QUERY_PASS}${NC}"
 echo ""
 fi
+echo -e "  💾 ${BOLD}Дані також збережено у файл:${NC} ${CYAN}admin-credentials.txt${NC}"
+echo ""
 echo -e "  📋 ${BOLD}Як підключитися:${NC}"
 echo -e "     1. Відкрийте клієнт TeamSpeak 6."
 echo -e "     2. Вставте адресу: ${CYAN}${PUBLIC_ADDR}${NC}"
 echo -e "     3. При запиті прав вставте токен адміністратора."
 echo ""
 echo -e "${GREEN}${BOLD}═════════════════════════════════════════════════════════════════════${NC}"
+echo ""
+read -p "Натисніть Enter для виходу..." -r
+echo ""
