@@ -17,7 +17,13 @@
 ---
 
 ## ⚡ Як користуватися: 2 простих варіанти
+0. Створюємо аккаунт Portwarp та створюємо Tunnel
+<img width="1421" height="751" alt="image" src="https://github.com/user-attachments/assets/d583b6bb-a9f3-4fbd-b0cf-1484477d6739" />
+<img width="1260" height="722" alt="image" src="https://github.com/user-attachments/assets/cd87166c-5598-4ed9-bed2-d14fe3361b88" />
+<img width="1421" height="751" alt="image" src="https://github.com/user-attachments/assets/b7f59102-7043-4c05-9a04-1e58ee8f6701" />
+<img width="1421" height="751" alt="image" src="https://github.com/user-attachments/assets/a340624f-7193-4d56-860f-825264d82e8e" />
 
+   
 ### 🌟 Варіант А: 100% Автоматизація через `.env` (без браузера)
 1. Відкрийте файл `.env`:
    ```bash
