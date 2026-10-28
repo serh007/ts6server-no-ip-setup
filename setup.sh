@@ -13,6 +13,26 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
+# Гарантоване утримання вікна відкритим при будь-якому виході (успіх або помилка)
+pause_on_exit() {
+    local exit_code=$?
+    echo ""
+    if [ $exit_code -ne 0 ]; then
+        echo -e "${RED}${BOLD}❌ Скрипт завершився з помилкою (код помилки: ${exit_code}).${NC}"
+        echo -e "${RED}Перегляньте повідомлення вище, щоб зрозуміти причину.${NC}"
+    else
+        echo -e "${GREEN}${BOLD}✓ Роботу скрипта успішно виконано!${NC}"
+    fi
+    echo ""
+    echo -e "${YELLOW}${BOLD}Натисніть Enter, щоб закрити це вікно...${NC}"
+    if [ -t 0 ]; then
+        read -r _
+    elif [ -e /dev/tty ]; then
+        read -r _ </dev/tty || true
+    fi
+}
+trap pause_on_exit EXIT
+
 echo -e "${CYAN}${BOLD}"
 echo "╔═══════════════════════════════════════════════════════════════════╗"
 echo "║          АВТОМАТИЧНИЙ ЗАПУСК TEAMSPEAK 6 + PORTWARP               ║"
@@ -174,6 +194,3 @@ echo -e "     2. Вставте адресу: ${CYAN}${PUBLIC_ADDR}${NC}"
 echo -e "     3. При запиті прав вставте токен адміністратора."
 echo ""
 echo -e "${GREEN}${BOLD}═════════════════════════════════════════════════════════════════════${NC}"
-echo ""
-read -p "Натисніть Enter для виходу..." -r
-echo ""
