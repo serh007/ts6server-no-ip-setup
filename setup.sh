@@ -76,19 +76,60 @@ echo -e "${BLUE}🔑 Перевірка авторизації Portwarp...${NC}"
 PWRP_DOCTOR=$(docker compose exec -T pwrp pwrp doctor 2>&1 || true)
 
 if echo "$PWRP_DOCTOR" | grep -q "not logged in"; then
-    echo -e "${YELLOW}Portwarp не авторизований.${NC}"
+    echo -e "${YELLOW}Portwarp ще не авторизований.${NC}"
     
+    # Спроба увійти з .env якщо дані є
+    LOGGED_IN=false
     if [ -n "$PORTWARP_EMAIL" ] && [ -n "$PORTWARP_PASSWORD" ]; then
         echo -e "${CYAN}Виконується автоматичний вхід через дані з .env (${PORTWARP_EMAIL})...${NC}"
-        if printf "%s\n%s\n" "$PORTWARP_EMAIL" "$PORTWARP_PASSWORD" | docker compose exec -T pwrp pwrp login --legacy; then
+        if printf "%s\n%s\n" "$PORTWARP_EMAIL" "$PORTWARP_PASSWORD" | docker compose exec -T pwrp pwrp login --legacy >/dev/null 2>&1; then
             echo -e "${GREEN}✓ Авторизація через .env успішна!${NC}"
+            LOGGED_IN=true
         else
-            echo -e "${RED}Не вдалося увійти з даними з .env. Запуск інтерактивного входу через браузер...${NC}"
+            echo -e "${RED}Не вдалося увійти з даними з .env.${NC}"
+        fi
+    fi
+
+    # Захист від дурня: якщо даних у .env немає або вони не підійшли — інтерактивний вибір
+    if [ "$LOGGED_IN" = false ]; then
+        echo ""
+        echo -e "${CYAN}${BOLD}Даних авторизації у .env немає. Оберіть спосіб входу:${NC}"
+        echo "  [1] Через браузер в 1 клік (Рекомендовано: посилання + код)"
+        echo "  [2] Ввести Email та Пароль вручну прямо зараз"
+        echo -n "Ваш вибір [1/2] (за замовчуванням 1): "
+        read -r LOGIN_CHOICE </dev/tty || LOGIN_CHOICE="1"
+        LOGIN_CHOICE=${LOGIN_CHOICE:-1}
+
+        if [ "$LOGIN_CHOICE" = "2" ]; then
+            echo -n "Введіть Email від portwarp.com: "
+            read -r INPUT_EMAIL </dev/tty || true
+            echo -n "Введіть Пароль від portwarp.com: "
+            read -s -r INPUT_PASS </dev/tty || true
+            echo ""
+            
+            if [ -n "$INPUT_EMAIL" ] && [ -n "$INPUT_PASS" ]; then
+                echo -e "${BLUE}Авторизація...${NC}"
+                if printf "%s\n%s\n" "$INPUT_EMAIL" "$INPUT_PASS" | docker compose exec -T pwrp pwrp login --legacy; then
+                    echo -e "${GREEN}✓ Успішний вхід!${NC}"
+                    echo -n "Зберегти ці дані у файл .env для наступних автозапусків? [Y/n]: "
+                    read -r SAVE_ENV </dev/tty || SAVE_ENV="y"
+                    SAVE_ENV=${SAVE_ENV:-y}
+                    if [[ "$SAVE_ENV" =~ ^[Yy]$ ]]; then
+                        sed -i -E "s|^PORTWARP_EMAIL=.*|PORTWARP_EMAIL=\"$INPUT_EMAIL\"|" .env 2>/dev/null || echo "PORTWARP_EMAIL=\"$INPUT_EMAIL\"" >> .env
+                        sed -i -E "s|^PORTWARP_PASSWORD=.*|PORTWARP_PASSWORD=\"$INPUT_PASS\"|" .env 2>/dev/null || echo "PORTWARP_PASSWORD=\"$INPUT_PASS\"" >> .env
+                        echo -e "${GREEN}✓ Облікові дані збережено в .env!${NC}"
+                    fi
+                else
+                    echo -e "${RED}Помилка авторизації за паролем. Перехід до входу через браузер...${NC}"
+                    docker compose exec pwrp pwrp login
+                fi
+            else
+                docker compose exec pwrp pwrp login
+            fi
+        else
+            echo -e "${CYAN}>>> Відкрийте посилання у браузері та введіть код авторизації: <<<${NC}"
             docker compose exec pwrp pwrp login
         fi
-    else
-        echo -e "${CYAN}>>> Відкрийте посилання у браузері та введіть код авторизації: <<<${NC}"
-        docker compose exec pwrp pwrp login
     fi
 else
     echo -e "${GREEN}✓ Portwarp уже авторизований!${NC}"
@@ -96,11 +137,21 @@ fi
 
 # 5. Налаштування тунелю
 echo -e "${BLUE}🔗 Налаштування та запуск тунелю Portwarp...${NC}"
-TUNNELS_LIST=$(docker compose exec -T pwrp pwrp tunnels 2>&1 || true)
-if echo "$TUNNELS_LIST" | grep -q "No tunnels found"; then
-    echo -e "${YELLOW}⚠️ У вашому акаунті Portwarp ще немає тунелів!${NC}"
-    echo -e "${CYAN}Будь ласка, перейдіть на https://portwarp.com/dashboard і створіть тунель (+ Add Tunnel: Protocol UDP, Port 9987).${NC}"
-fi
+
+# Захист від дурня: якщо тунелів в акаунті немає взагалі — чекаємо створення на сайті
+while true; do
+    TUNNELS_LIST=$(docker compose exec -T pwrp pwrp tunnels 2>&1 || true)
+    if echo "$TUNNELS_LIST" | grep -q "No tunnels found"; then
+        echo ""
+        echo -e "${YELLOW}${BOLD}⚠️ У вашому акаунті Portwarp ще немає жодного тунелю!${NC}"
+        echo -e "${CYAN}1. Відкрийте браузер: https://portwarp.com/dashboard${NC}"
+        echo -e "${CYAN}2. Натисніть '+ Add Tunnel' (Protocol: UDP, Local Port: 9987)${NC}"
+        echo -e "${YELLOW}Після створення тунелю на сайті натисніть Enter, щоб продовжити...${NC}"
+        read -r _ </dev/tty || true
+    else
+        break
+    fi
+done
 
 TUNNEL_NAME="${PORTWARP_TUNNEL_NAME:-TeamSpeak 3}"
 
@@ -110,6 +161,7 @@ docker compose exec -T pwrp pwrp target set 1 teamspeak >/dev/null 2>&1 || true
 
 # Підключення тунелю
 CONNECT_OUT=$(docker compose exec -T pwrp pwrp connect "${TUNNEL_NAME}" --detach --save 2>&1 || \
+              docker compose exec -T pwrp pwrp connect 1 --detach --save 2>&1 || \
               docker compose exec -T pwrp pwrp connect --all --detach --save 2>&1 || true)
 
 AUTO_ADDR=$(echo "$CONNECT_OUT" | grep -E -o '[a-zA-Z0-9.-]+\.tryportwarp\.cc:[0-9]+' | head -n 1 || true)

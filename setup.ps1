@@ -75,20 +75,72 @@ try {
     $doctor = docker compose exec -T pwrp pwrp doctor 2>&1 | Out-String
 
     if ($doctor -match "not logged in") {
-        Write-Host "Portwarp не авторизований." -ForegroundColor Yellow
+        Write-Host "Portwarp ще не авторизований." -ForegroundColor Yellow
+        $loggedIn = $false
+
         if ($global:PORTWARP_EMAIL -and $global:PORTWARP_PASSWORD) {
             Write-Host "Виконується автоматичний вхід через дані з .env ($($global:PORTWARP_EMAIL))..." -ForegroundColor Cyan
             $inputData = "$($global:PORTWARP_EMAIL)`n$($global:PORTWARP_PASSWORD)`n"
-            $inputData | docker compose exec -i pwrp pwrp login --legacy
+            $inputData | docker compose exec -i pwrp pwrp login --legacy 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "✓ Авторизація через .env успішна!" -ForegroundColor Green
+                $loggedIn = $true
             } else {
-                Write-Host "Не вдалося увійти з даними з .env. Запуск інтерактивного входу через браузер..." -ForegroundColor Red
+                Write-Host "Не вдалося увійти з даними з .env." -ForegroundColor Red
+            }
+        }
+
+        # Захист від дурня: якщо даних у .env немає — інтерактивний вибір
+        if (-not $loggedIn) {
+            Write-Host "`nДаних авторизації у .env немає. Оберіть спосіб входу:" -ForegroundColor Cyan
+            Write-Host "  [1] Через браузер в 1 клік (Рекомендовано: посилання + код)"
+            Write-Host "  [2] Ввести Email та Пароль вручну прямо зараз"
+            $choice = Read-Host "Ваш вибір [1/2] (за замовчуванням 1)"
+            if (-not $choice) { $choice = "1" }
+
+            if ($choice -eq "2") {
+                $inputEmail = Read-Host "Введіть Email від portwarp.com"
+                $inputPass = Read-Host "Введіть Пароль від portwarp.com"
+                
+                if ($inputEmail -and $inputPass) {
+                    Write-Host "Авторизація..." -ForegroundColor Blue
+                    $inputData = "$inputEmail`n$inputPass`n"
+                    $inputData | docker compose exec -i pwrp pwrp login --legacy
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Host "✓ Успішний вхід!" -ForegroundColor Green
+                        $saveEnv = Read-Host "Зберегти ці дані у файл .env для наступних автозапусків? [Y/n]"
+                        if (-not $saveEnv -or $saveEnv -match "^[Yy]") {
+                            $envLines = Get-Content $envFile -ErrorAction SilentlyContinue
+                            $newLines = @()
+                            $emailSet = $false
+                            $passSet = $false
+                            foreach ($l in $envLines) {
+                                if ($l -match "^PORTWARP_EMAIL=") {
+                                    $newLines += "PORTWARP_EMAIL=`"$inputEmail`""
+                                    $emailSet = $true
+                                } elseif ($l -match "^PORTWARP_PASSWORD=") {
+                                    $newLines += "PORTWARP_PASSWORD=`"$inputPass`""
+                                    $passSet = $true
+                                } else {
+                                    $newLines += $l
+                                }
+                            }
+                            if (-not $emailSet) { $newLines += "PORTWARP_EMAIL=`"$inputEmail`"" }
+                            if (-not $passSet) { $newLines += "PORTWARP_PASSWORD=`"$inputPass`"" }
+                            Set-Content -Path $envFile -Value $newLines -Encoding UTF8
+                            Write-Host "✓ Облікові дані збережено в .env!" -ForegroundColor Green
+                        }
+                    } else {
+                        Write-Host "Помилка авторизації за паролем. Перехід до входу через браузер..." -ForegroundColor Red
+                        docker compose exec pwrp pwrp login
+                    }
+                } else {
+                    docker compose exec pwrp pwrp login
+                }
+            } else {
+                Write-Host ">>> Відкрийте посилання у браузері та введіть код авторизації: <<<" -ForegroundColor Cyan
                 docker compose exec pwrp pwrp login
             }
-        } else {
-            Write-Host ">>> Відкрийте посилання у браузері та введіть код авторизації: <<<" -ForegroundColor Cyan
-            docker compose exec pwrp pwrp login
         }
     } else {
         Write-Host "✓ Portwarp уже авторизований!" -ForegroundColor Green
@@ -96,10 +148,19 @@ try {
 
     # 5. Налаштування тунелю
     Write-Host "🔗 Налаштування та запуск тунелю Portwarp..." -ForegroundColor Blue
-    $tunnelsList = docker compose exec -T pwrp pwrp tunnels 2>&1 | Out-String
-    if ($tunnelsList -match "No tunnels found") {
-        Write-Host "⚠️ У вашому акаунті Portwarp ще немає тунелів!" -ForegroundColor Yellow
-        Write-Host "Будь ласка, перейдіть на https://portwarp.com/dashboard і створіть тунель (+ Add Tunnel: Protocol UDP, Port 9987)." -ForegroundColor Cyan
+
+    # Захист від дурня: якщо тунелів немає — очікуємо створення на сайті
+    while ($true) {
+        $tunnelsList = docker compose exec -T pwrp pwrp tunnels 2>&1 | Out-String
+        if ($tunnelsList -match "No tunnels found") {
+            Write-Host "`n⚠️ У вашому акаунті Portwarp ще немає жодного тунелю!" -ForegroundColor Yellow
+            Write-Host "1. Відкрийте браузер: https://portwarp.com/dashboard" -ForegroundColor Cyan
+            Write-Host "2. Натисніть '+ Add Tunnel' (Protocol: UDP, Local Port: 9987)" -ForegroundColor Cyan
+            Write-Host "Після створення тунелю на сайті натисніть Enter, щоб продовжити..." -ForegroundColor Yellow
+            [void][System.Console]::ReadLine()
+        } else {
+            break
+        }
     }
 
     $tunnel = $global:PORTWARP_TUNNEL_NAME
@@ -110,6 +171,9 @@ try {
     }
 
     $connectOut = docker compose exec -T pwrp pwrp connect $tunnel --detach --save 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        $connectOut = docker compose exec -T pwrp pwrp connect 1 --detach --save 2>&1 | Out-String
+    }
     if ($LASTEXITCODE -ne 0) {
         $connectOut = docker compose exec -T pwrp pwrp connect --all --detach --save 2>&1 | Out-String
     }
