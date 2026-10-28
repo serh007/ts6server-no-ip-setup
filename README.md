@@ -29,12 +29,12 @@
    ```bash
    nano .env
    ```
-2. Вкажіть ваші дані акаунта `portwarp.com`:
+2. Вкажіть ваші дані акаунта `portwarp.com` та вставте адресу яку оримали при відкритті тунелю:
    ```env
    PORTWARP_EMAIL="ваш_email@gmail.com"
    PORTWARP_PASSWORD="ваш_пароль"
    PORTWARP_TUNNEL_NAME="TeamSpeak 3"
-   PORTWARP_PUBLIC_ADDRESS="i6zuaqdg.free.tryportwarp.cc:10153"
+   PORTWARP_PUBLIC_ADDRESS="i6zuaqdg.free.tryportwarp.cc:12345"
    ```
 3. Запустіть один скрипт:
    * **На Linux / macOS:**
@@ -64,7 +64,7 @@
 
 * **Публічна адреса:**
   ```text
-  i6zuaqdg.free.tryportwarp.cc:10153
+  i6zuaqdg.free.tryportwarp.cc:12345
   ```
 * **Локальна адреса (з цього ПК):**
   ```text
@@ -72,11 +72,11 @@
   ```
 * **Ключ повного адміністратора (ServerAdmin Token):**
   ```text
-  xxUTjJwTlDgTxLObtDcqfv6BJBjj69s5TdCe9HMn
+  someTokenDgTxLObtDcqfv6BJBjj69s5TdCe9HMn
   ```
 * **ServerQuery Admin:**
   * Login: `serveradmin`
-  * Password: `4g5miKzv`
+  * Password: `passiKzv`
 
 ---
 
