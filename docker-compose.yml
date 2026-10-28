@@ -1,0 +1,53 @@
+services:
+  # Сервер TeamSpeak 6 (Beta)
+  teamspeak:
+    build: .
+    image: ts6-server:latest
+    container_name: ts6-server
+    restart: unless-stopped
+    ports:
+      - "${TSSERVER_DEFAULT_PORT:-9987}:9987/udp"     # Основний порт для голосу
+      - "${TSSERVER_FILE_TRANSFER_PORT:-30033}:30033/tcp"   # Порт передачі файлів
+      - "${TSSERVER_QUERY_HTTP_PORT:-10080}:10080/tcp"   # WebQuery порт
+    environment:
+      - TSSERVER_LICENSE_ACCEPTED=accept
+      - TSSERVER_DEFAULT_PORT=${TSSERVER_DEFAULT_PORT:-9987}
+      - TSSERVER_VOICE_IP=0.0.0.0
+      - TSSERVER_FILE_TRANSFER_PORT=${TSSERVER_FILE_TRANSFER_PORT:-30033}
+      - TSSERVER_FILE_TRANSFER_IP=0.0.0.0
+    volumes:
+      - ts6-data:/var/tsserver
+    networks:
+      - ts6-net
+
+  # Клієнт тунелювання Portwarp CLI для доступу через Інтернет
+  pwrp:
+    image: ghcr.io/portwarp/cli:latest
+    container_name: ts6-portwarp
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    volumes:
+      - pwrp-data:/home/pwrp/.portwarp
+    networks:
+      - ts6-net
+    stop_grace_period: 20s
+    depends_on:
+      - teamspeak
+
+volumes:
+  ts6-data:
+    name: ts6-server-data
+  pwrp-data:
+    name: ts6-portwarp-data
+
+networks:
+  ts6-net:
+    name: ts6-network
+    driver: bridge
