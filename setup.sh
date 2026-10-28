@@ -73,9 +73,21 @@ sleep 3
 
 # 4. Перевірка авторизації Portwarp
 echo -e "${BLUE}🔑 Перевірка авторизації Portwarp...${NC}"
+
+CURRENT_AUTH_EMAIL=$(docker compose exec -T pwrp cat /home/pwrp/.portwarp/credentials.json 2>/dev/null | grep '"email"' | cut -d'"' -f4 || true)
+CURRENT_AUTH_USER=$(docker compose exec -T pwrp cat /home/pwrp/.portwarp/credentials.json 2>/dev/null | grep '"username"' | cut -d'"' -f4 || true)
+
+# Якщо в .env вказана пошта, і вона відрізняється від поточної збереженої авторизації - перелогінюємось
+if [ -n "$PORTWARP_EMAIL" ] && [ -n "$CURRENT_AUTH_EMAIL" ] && [ "$PORTWARP_EMAIL" != "$CURRENT_AUTH_EMAIL" ]; then
+    echo -e "${YELLOW}ℹ Виявлено нову пошту в .env (${PORTWARP_EMAIL}), попередня була (${CURRENT_AUTH_EMAIL}). Перелогінюємось...${NC}"
+    docker compose exec -T pwrp pwrp logout >/dev/null 2>&1 || true
+    CURRENT_AUTH_EMAIL=""
+    CURRENT_AUTH_USER=""
+fi
+
 PWRP_DOCTOR=$(docker compose exec -T pwrp pwrp doctor 2>&1 || true)
 
-if echo "$PWRP_DOCTOR" | grep -q "not logged in"; then
+if echo "$PWRP_DOCTOR" | grep -q "not logged in" || [ -z "$CURRENT_AUTH_EMAIL" ]; then
     echo -e "${YELLOW}Portwarp ще не авторизований.${NC}"
     
     # Спроба увійти з .env якщо дані є
@@ -93,7 +105,7 @@ if echo "$PWRP_DOCTOR" | grep -q "not logged in"; then
     # Захист від дурня: якщо даних у .env немає або вони не підійшли — інтерактивний вибір
     if [ "$LOGGED_IN" = false ]; then
         echo ""
-        echo -e "${CYAN}${BOLD}Даних авторизації у .env немає. Оберіть спосіб входу:${NC}"
+        echo -e "${CYAN}${BOLD}Даних авторизації у .env немає або вони невірні. Оберіть спосіб входу:${NC}"
         echo "  [1] Через браузер в 1 клік (Рекомендовано: посилання + код)"
         echo "  [2] Ввести Email та Пароль вручну прямо зараз"
         echo -n "Ваш вибір [1/2] (за замовчуванням 1): "
@@ -131,23 +143,50 @@ if echo "$PWRP_DOCTOR" | grep -q "not logged in"; then
             docker compose exec pwrp pwrp login
         fi
     fi
+fi
+
+# Відображення авторизованого акаунта
+AUTH_USER=$(docker compose exec -T pwrp cat /home/pwrp/.portwarp/credentials.json 2>/dev/null | grep '"username"' | cut -d'"' -f4 || true)
+AUTH_EMAIL=$(docker compose exec -T pwrp cat /home/pwrp/.portwarp/credentials.json 2>/dev/null | grep '"email"' | cut -d'"' -f4 || true)
+
+if [ -n "$AUTH_EMAIL" ]; then
+    echo -e "${GREEN}✓ Portwarp підключено до акаунта: ${BOLD}${CYAN}${AUTH_EMAIL}${NC} (нікнейм: ${BOLD}${AUTH_USER:-N/A}${NC})"
+elif [ -n "$AUTH_USER" ]; then
+    echo -e "${GREEN}✓ Portwarp підключено: ${BOLD}${CYAN}${AUTH_USER}${NC}"
 else
-    echo -e "${GREEN}✓ Portwarp уже авторизований!${NC}"
+    echo -e "${GREEN}✓ Portwarp авторизований!${NC}"
 fi
 
 # 5. Налаштування тунелю
 echo -e "${BLUE}🔗 Налаштування та запуск тунелю Portwarp...${NC}"
 
-# Захист від дурня: якщо тунелів в акаунті немає взагалі — чекаємо створення на сайті
+# Захист від дурня: якщо тунелів в акаунті немає — пропонуємо перелогінитися або створити
 while true; do
     TUNNELS_LIST=$(docker compose exec -T pwrp pwrp tunnels 2>&1 || true)
     if echo "$TUNNELS_LIST" | grep -q "No tunnels found"; then
         echo ""
-        echo -e "${YELLOW}${BOLD}⚠️ У вашому акаунті Portwarp ще немає жодного тунелю!${NC}"
-        echo -e "${CYAN}1. Відкрийте браузер: https://portwarp.com/dashboard${NC}"
-        echo -e "${CYAN}2. Натисніть '+ Add Tunnel' (Protocol: UDP, Local Port: 9987)${NC}"
-        echo -e "${YELLOW}Після створення тунелю на сайті натисніть Enter, щоб продовжити...${NC}"
-        read -r _ </dev/tty || true
+        echo -e "${YELLOW}${BOLD}⚠️ Увага: В акаунті [${AUTH_USER} (${AUTH_EMAIL})] ще немає жодного тунелю!${NC}"
+        echo -e "${CYAN}Якщо ваш тунель створено під іншим акаунтом у браузері, потрібно перелогінитися.${NC}"
+        echo ""
+        echo "  [1] Перелогінитися під акаунт, відкритий у браузері (Рекомендовано)"
+        echo "  [2] Створити тунель на https://portwarp.com/dashboard та оновити (Retry)"
+        echo -n "Ваш вибір [1/2] (за замовчуванням 1): "
+        read -r RELOGIN_CHOICE </dev/tty || RELOGIN_CHOICE="1"
+        RELOGIN_CHOICE=${RELOGIN_CHOICE:-1}
+
+        if [ "$RELOGIN_CHOICE" = "1" ]; then
+            echo -e "${BLUE}Вихід із поточного акаунта...${NC}"
+            docker compose exec -T pwrp pwrp logout >/dev/null 2>&1 || true
+            echo -e "${CYAN}>>> Запуск авторизації. Відкрийте посилання та підтвердіть під потрібним акаунтом: <<<${NC}"
+            docker compose exec pwrp pwrp login
+            
+            AUTH_USER=$(docker compose exec -T pwrp cat /home/pwrp/.portwarp/credentials.json 2>/dev/null | grep '"username"' | cut -d'"' -f4 || true)
+            AUTH_EMAIL=$(docker compose exec -T pwrp cat /home/pwrp/.portwarp/credentials.json 2>/dev/null | grep '"email"' | cut -d'"' -f4 || true)
+            echo -e "${GREEN}✓ Новий авторизований акаунт: ${BOLD}${CYAN}${AUTH_USER}${NC} (${AUTH_EMAIL})"
+        else
+            echo -e "${YELLOW}Після створення тунелю на сайті натисніть Enter, щоб продовжити...${NC}"
+            read -r _ </dev/tty || true
+        fi
     else
         break
     fi
@@ -160,11 +199,17 @@ docker compose exec -T pwrp pwrp target set "${TUNNEL_NAME}" teamspeak >/dev/nul
 docker compose exec -T pwrp pwrp target set 1 teamspeak >/dev/null 2>&1 || true
 
 # Підключення тунелю
-CONNECT_OUT=$(docker compose exec -T pwrp pwrp connect "${TUNNEL_NAME}" --detach --save 2>&1 || \
-              docker compose exec -T pwrp pwrp connect 1 --detach --save 2>&1 || \
-              docker compose exec -T pwrp pwrp connect --all --detach --save 2>&1 || true)
+CONNECT_OUT=$(docker compose exec -T pwrp pwrp connect "${TUNNEL_NAME}" --detach --save --local-host teamspeak 2>&1 || \
+              docker compose exec -T pwrp pwrp connect 1 --detach --save --local-host teamspeak 2>&1 || \
+              docker compose exec -T pwrp pwrp connect --all --detach --save --local-host teamspeak 2>&1 || true)
 
 AUTO_ADDR=$(echo "$CONNECT_OUT" | grep -E -o '[a-zA-Z0-9.-]+\.tryportwarp\.cc:[0-9]+' | head -n 1 || true)
+if [ -z "$AUTO_ADDR" ]; then
+    AUTO_ADDR=$(docker compose exec -T pwrp pwrp tunnels 2>&1 | grep -E -o '[a-zA-Z0-9.-]+\.tryportwarp\.cc:[0-9]+' | head -n 1 || true)
+fi
+if [ -z "$AUTO_ADDR" ]; then
+    AUTO_ADDR=$(docker compose exec -T pwrp pwrp ps --once 2>&1 | grep -E -o '[a-zA-Z0-9.-]+\.tryportwarp\.cc:[0-9]+' | head -n 1 || true)
+fi
 
 # 6. Очікування отримання токена TeamSpeak
 echo -e "${BLUE}⏳ Перевірка ключа привілеїв TeamSpeak 6...${NC}"
@@ -209,6 +254,7 @@ cat <<EOF > admin-credentials.txt
 =====================================================================
                    TEAMSPEAK 6 SERVER CREDENTIALS
 =====================================================================
+Portwarp акаунт:       ${AUTH_EMAIL:-N/A} (${AUTH_USER:-N/A})
 Адреса для підключення: ${PUBLIC_ADDR}
 Локальна адреса:       localhost:9987
 ServerAdmin Token:     ${ADMIN_TOKEN}
@@ -222,6 +268,11 @@ echo -e "${GREEN}${BOLD}══════════════════�
 echo -e "${GREEN}${BOLD}             🎉 СЕРВЕР TEAMSPEAK 6 ГОТОВИЙ ДО РОБОТИ!               ${NC}"
 echo -e "${GREEN}${BOLD}═════════════════════════════════════════════════════════════════════${NC}"
 echo ""
+if [ -n "$AUTH_EMAIL" ]; then
+echo -e "  📧 ${BOLD}Portwarp акаунт (email):${NC}"
+echo -e "     ${CYAN}${BOLD}${AUTH_EMAIL}${NC} (${AUTH_USER:-N/A})"
+echo ""
+fi
 echo -e "  🌐 ${BOLD}Адреса для підключення з Інтернету:${NC}"
 echo -e "     ${CYAN}${BOLD}${PUBLIC_ADDR}${NC}"
 echo ""

@@ -72,9 +72,31 @@ try {
 
     # 4. Перевірка авторизації Portwarp
     Write-Host "🔑 Перевірка авторизації Portwarp..." -ForegroundColor Blue
+
+    $currentAuthEmail = ""
+    $currentAuthUser = ""
+    try {
+        $credJsonRaw = docker compose exec -T pwrp cat /home/pwrp/.portwarp/credentials.json 2>$null | Out-String
+        if ($credJsonRaw) {
+            $credObj = $credJsonRaw | ConvertFrom-Json -ErrorAction SilentlyContinue
+            if ($credObj) {
+                $currentAuthUser = $credObj.username
+                $currentAuthEmail = $credObj.email
+            }
+        }
+    } catch {}
+
+    # Якщо в .env вказана пошта, і вона відрізняється від поточної збереженої авторизації - перелогінюємось
+    if ($global:PORTWARP_EMAIL -and $currentAuthEmail -and ($global:PORTWARP_EMAIL -ne $currentAuthEmail)) {
+        Write-Host "ℹ Виявлено нову пошту в .env ($($global:PORTWARP_EMAIL)), попередня була ($currentAuthEmail). Перелогінюємось..." -ForegroundColor Yellow
+        docker compose exec -T pwrp pwrp logout 2>&1 | Out-Null
+        $currentAuthEmail = ""
+        $currentAuthUser = ""
+    }
+
     $doctor = docker compose exec -T pwrp pwrp doctor 2>&1 | Out-String
 
-    if ($doctor -match "not logged in") {
+    if ($doctor -match "not logged in" -or (-not $currentAuthEmail)) {
         Write-Host "Portwarp ще не авторизований." -ForegroundColor Yellow
         $loggedIn = $false
 
@@ -92,7 +114,7 @@ try {
 
         # Захист від дурня: якщо даних у .env немає — інтерактивний вибір
         if (-not $loggedIn) {
-            Write-Host "`nДаних авторизації у .env немає. Оберіть спосіб входу:" -ForegroundColor Cyan
+            Write-Host "`nДаних авторизації у .env немає або вони невірні. Оберіть спосіб входу:" -ForegroundColor Cyan
             Write-Host "  [1] Через браузер в 1 клік (Рекомендовано: посилання + код)"
             Write-Host "  [2] Ввести Email та Пароль вручну прямо зараз"
             $choice = Read-Host "Ваш вибір [1/2] (за замовчуванням 1)"
@@ -142,22 +164,64 @@ try {
                 docker compose exec pwrp pwrp login
             }
         }
+    }
+
+    # Відображення авторизованого акаунта
+    $authUser = ""
+    $authEmail = ""
+    try {
+        $credJsonRaw = docker compose exec -T pwrp cat /home/pwrp/.portwarp/credentials.json 2>$null | Out-String
+        if ($credJsonRaw) {
+            $credObj = $credJsonRaw | ConvertFrom-Json -ErrorAction SilentlyContinue
+            if ($credObj) {
+                $authUser = $credObj.username
+                $authEmail = $credObj.email
+            }
+        }
+    } catch {}
+
+    if ($authEmail) {
+        Write-Host "✓ Portwarp підключено до акаунта: $authEmail (нікнейм: $authUser)" -ForegroundColor Green
+    } elseif ($authUser) {
+        Write-Host "✓ Portwarp підключено: $authUser" -ForegroundColor Green
     } else {
-        Write-Host "✓ Portwarp уже авторизований!" -ForegroundColor Green
+        Write-Host "✓ Portwarp авторизований!" -ForegroundColor Green
     }
 
     # 5. Налаштування тунелю
     Write-Host "🔗 Налаштування та запуск тунелю Portwarp..." -ForegroundColor Blue
 
-    # Захист від дурня: якщо тунелів немає — очікуємо створення на сайті
+    # Захист від дурня: якщо тунелів немає — пропонуємо перелогінитися або створити
     while ($true) {
         $tunnelsList = docker compose exec -T pwrp pwrp tunnels 2>&1 | Out-String
         if ($tunnelsList -match "No tunnels found") {
-            Write-Host "`n⚠️ У вашому акаунті Portwarp ще немає жодного тунелю!" -ForegroundColor Yellow
-            Write-Host "1. Відкрийте браузер: https://portwarp.com/dashboard" -ForegroundColor Cyan
-            Write-Host "2. Натисніть '+ Add Tunnel' (Protocol: UDP, Local Port: 9987)" -ForegroundColor Cyan
-            Write-Host "Після створення тунелю на сайті натисніть Enter, щоб продовжити..." -ForegroundColor Yellow
-            [void][System.Console]::ReadLine()
+            Write-Host "`n⚠️ Увага: В акаунті [$authUser ($authEmail)] ще немає жодного тунелю!" -ForegroundColor Yellow
+            Write-Host "Якщо ваш тунель створено під іншим акаунтом у браузері, потрібно перелогінитися.`n" -ForegroundColor Cyan
+            Write-Host "  [1] Перелогінитися під акаунт, відкритий у браузері (Рекомендовано)"
+            Write-Host "  [2] Створити тунель на https://portwarp.com/dashboard та оновити (Retry)"
+            $reloginChoice = Read-Host "Ваш вибір [1/2] (за замовчуванням 1)"
+            if (-not $reloginChoice) { $reloginChoice = "1" }
+
+            if ($reloginChoice -eq "1") {
+                Write-Host "Вихід із поточного акаунта..." -ForegroundColor Blue
+                docker compose exec -T pwrp pwrp logout 2>&1 | Out-Null
+                Write-Host ">>> Запуск авторизації. Відкрийте посилання та підтвердіть під потрібним акаунтом: <<<" -ForegroundColor Cyan
+                docker compose exec pwrp pwrp login
+                try {
+                    $credJsonRaw = docker compose exec -T pwrp cat /home/pwrp/.portwarp/credentials.json 2>$null | Out-String
+                    if ($credJsonRaw) {
+                        $credObj = $credJsonRaw | ConvertFrom-Json -ErrorAction SilentlyContinue
+                        if ($credObj) {
+                            $authUser = $credObj.username
+                            $authEmail = $credObj.email
+                        }
+                    }
+                } catch {}
+                Write-Host "✓ Новий авторизований акаунт: $authUser ($authEmail)" -ForegroundColor Green
+            } else {
+                Write-Host "Після створення тунелю на сайті натисніть Enter, щоб продовжити..." -ForegroundColor Yellow
+                [void][System.Console]::ReadLine()
+            }
         } else {
             break
         }
@@ -170,17 +234,29 @@ try {
         docker compose exec -T pwrp pwrp target set 1 teamspeak 2>&1 | Out-Null
     }
 
-    $connectOut = docker compose exec -T pwrp pwrp connect $tunnel --detach --save 2>&1 | Out-String
+    $connectOut = docker compose exec -T pwrp pwrp connect $tunnel --detach --save --local-host teamspeak 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
-        $connectOut = docker compose exec -T pwrp pwrp connect 1 --detach --save 2>&1 | Out-String
+        $connectOut = docker compose exec -T pwrp pwrp connect 1 --detach --save --local-host teamspeak 2>&1 | Out-String
     }
     if ($LASTEXITCODE -ne 0) {
-        $connectOut = docker compose exec -T pwrp pwrp connect --all --detach --save 2>&1 | Out-String
+        $connectOut = docker compose exec -T pwrp pwrp connect --all --detach --save --local-host teamspeak 2>&1 | Out-String
     }
 
     $autoAddr = ""
     if ($connectOut -match "([a-zA-Z0-9.-]+\.tryportwarp\.cc:\d+)") {
         $autoAddr = $Matches[1]
+    }
+    if (-not $autoAddr) {
+        $tunnelsOut = docker compose exec -T pwrp pwrp tunnels 2>&1 | Out-String
+        if ($tunnelsOut -match "([a-zA-Z0-9.-]+\.tryportwarp\.cc:\d+)") {
+            $autoAddr = $Matches[1]
+        }
+    }
+    if (-not $autoAddr) {
+        $psOut = docker compose exec -T pwrp pwrp ps --once 2>&1 | Out-String
+        if ($psOut -match "([a-zA-Z0-9.-]+\.tryportwarp\.cc:\d+)") {
+            $autoAddr = $Matches[1]
+        }
     }
 
     # 6. Очікування отримання токена TeamSpeak
@@ -239,6 +315,7 @@ try {
 =====================================================================
                    TEAMSPEAK 6 SERVER CREDENTIALS
 =====================================================================
+Portwarp акаунт:       $authEmail ($authUser)
 Адреса для підключення: $publicAddr
 Локальна адреса:       localhost:9987
 ServerAdmin Token:     $adminToken
@@ -252,7 +329,12 @@ ServerQuery Admin:     login: serveradmin | pass: $(if ($queryPass) { $queryPass
     Write-Host "             🎉 СЕРВЕР TEAMSPEAK 6 ГОТОВИЙ ДО РОБОТИ!               " -ForegroundColor Green
     Write-Host "═════════════════════════════════════════════════════════════════════`n" -ForegroundColor Green
 
-    Write-Host "  🌐 Адреса для підключення з Інтернету:"
+    if ($authEmail) {
+        Write-Host "  📧 Portwarp акаунт (email):"
+        Write-Host "     $authEmail ($authUser)" -ForegroundColor Cyan
+    }
+
+    Write-Host "`n  🌐 Адреса для підключення з Інтернету:"
     Write-Host "     $publicAddr" -ForegroundColor Cyan
 
     Write-Host "`n  🏠 Локальна адреса (з цього ПК):"
